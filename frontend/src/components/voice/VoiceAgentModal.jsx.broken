@@ -1,0 +1,1010 @@
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { X, Mic, MicOff, Volume2, MessageSquare } from 'lucide-react';
+
+/**
+ * VoiceAgentModal - ChatGPT-style voice interface with auto-silence detection
+ * 
+ * States:
+ * - idle: Waiting for user to speak
+ * - listening: User is speaking (mic animated)
+ * - thinking: Processing query (no animation)  
+ * - speaking: Agent responding (orb animated, captions shown)
+ * 
+ * Features:
+ * - Auto-detects when user stops speaking (silence detection)
+ * - Automatically starts processing after silence timeout
+ */
+const VoiceAgentModal = ({
+    isOpen,
+    onClose,
+    backendUrl,
+    category = null,
+    onSessionEnd = null // Callback with conversation summary
+}) => {
+    // Voice states: idle, listening, thinking, speaking
+    const [voiceState, setVoiceState] = useState('idle');
+    const [currentCaption, setCurrentCaption] = useState('');
+    const [conversationHistory, setConversationHistory] = useState([]);
+    const [error, setError] = useState(null);
+    const [audioLevel, setAudioLevel] = useState(0); // For visual feedback
+    const [conversationState, setConversationState] = useState(null); // For multi-turn actions
+    const [pendingAction, setPendingAction] = useState(null); // Pending task creation
+
+    // Refs
+    const mediaRecorderRef = useRef(null);
+    const audioChunksRef = useRef([]);
+    const streamRef = useRef(null);
+    const audioRef = useRef(null);
+    const captionTimeoutRef = useRef(null);
+    const audioContextRef = useRef(null);
+    const analyzerRef = useRef(null);
+    const silenceTimeoutRef = useRef(null);
+    const animationFrameRef = useRef(null);
+    const lastSpeechTimeRef = useRef(Date.now());
+    const isListeningRef = useRef(false); // Track listening state for closure
+    const idleTimeoutRef = useRef(null); // Auto-return to idle timeout
+    const hasPlayedGreetingRef = useRef(false); // Track if initial greeting has played
+    const conversationStateRef = useRef(null); // Ref to always have latest conversation state
+
+    // Silence detection settings
+    const SILENCE_THRESHOLD = 8; // Audio level below this is considered silence
+    const SILENCE_DURATION = 2000; // 2 seconds of silence to auto-stop
+    const MIN_RECORDING_TIME = 500; // Reduced to 500ms for short voice inputs
+    const IDLE_TIMEOUT = 10000; // 10 seconds of no activity returns to idle
+    const ACTION_IDLE_TIMEOUT = 30000; // 30 seconds during action flows
+
+    // Confirmation/cancellation keywords (expanded for voice)
+    const CONFIRM_KEYWORDS = [
+        'yes', 'yeah', 'yep', 'confirm', 'sure', 'ok', 'okay',
+        'do it', 'go ahead', 'create it', 'please', 'correct',
+        'absolutely', 'definitely', 'proceed', 'approved', 'make it',
+        'that is correct', "that's correct", 'go for it'
+    ];
+    const CANCEL_KEYWORDS = ['no', 'nope', 'cancel', 'stop', 'never mind', 'nevermind', 'forget it', 'dont', "don't", 'wait', 'abort'];
+
+    // Client-side Filler Phrases (Hybrid TTS)
+    const FILLER_PHRASES = {
+        'leave_balance': ["Checking your leave balance...", "Let me see how many leaves you have...", "One moment..."],
+        'project_status': ["Pulling up project details...", "Let me check the status...", "Looking that up..."],
+        'create_task': ["Okay, getting ready to create a task...", "Sure, I can help with that...", "Noted..."],
+        'unknown': ["Let me think...", "Just a second...", "Processing that..."],
+        'apply_leave': ["Opening leave request...", "Sure, let's apply for leave...", "One moment..."],
+        'default': ["Okay...", "Sure...", "Let me check...", "On it..."]
+    };
+
+    // Play local browser TTS (Zero Latency)
+    const playLocalFiller = (intent) => {
+        if (!window.speechSynthesis) return;
+
+        // Pick a phrase
+        const phrases = FILLER_PHRASES[intent] || FILLER_PHRASES['default'];
+        const phrase = phrases[Math.floor(Math.random() * phrases.length)];
+
+        console.log(`🗣️ Browser TTS (Instant): "${phrase}"`);
+        setCurrentCaption(phrase);
+
+        // Cancel any existing speech
+        window.speechSynthesis.cancel();
+
+        const utterance = new SpeechSynthesisUtterance(phrase);
+        utterance.rate = 1.1; // Slightly faster
+        utterance.pitch = 1.0;
+        utterance.volume = 0.8;
+
+        // Try to pick a decent voice if available
+        const voices = window.speechSynthesis.getVoices();
+        const preferredVoice = voices.find(v => v.name.includes('Google') || v.name.includes('Neural') || v.lang.startsWith('en'));
+        if (preferredVoice) utterance.voice = preferredVoice;
+
+        window.speechSynthesis.speak(utterance);
+    };
+
+    // Cleanup on unmount or close
+    useEffect(() => {
+        if (!isOpen) {
+            stopRecording();
+            stopAudio();
+            setVoiceState('idle');
+            setCurrentCaption('');
+        }
+
+        return () => {
+            stopRecording();
+            stopAudio();
+            if (captionTimeoutRef.current) {
+                clearTimeout(captionTimeoutRef.current);
+            }
+            if (silenceTimeoutRef.current) {
+                clearTimeout(silenceTimeoutRef.current);
+            }
+            if (animationFrameRef.current) {
+                cancelAnimationFrame(animationFrameRef.current);
+            }
+            if (audioContextRef.current) {
+                audioContextRef.current.close();
+            }
+            if (idleTimeoutRef.current) {
+                clearTimeout(idleTimeoutRef.current);
+            }
+        };
+    }, [isOpen]);
+
+    const stopAudio = () => {
+        if (audioRef.current) {
+            audioRef.current.pause();
+            audioRef.current = null;
+        }
+    };
+
+    const stopRecording = () => {
+        // Clear silence detection
+        if (silenceTimeoutRef.current) {
+            clearTimeout(silenceTimeoutRef.current);
+        }
+        if (animationFrameRef.current) {
+            cancelAnimationFrame(animationFrameRef.current);
+        }
+
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+            // Request any final data before stopping to ensure complete WebM file
+            if (mediaRecorderRef.current.state === 'recording') {
+                mediaRecorderRef.current.requestData();
+            }
+            mediaRecorderRef.current.stop();
+        }
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
+            streamRef.current = null;
+        }
+
+        setAudioLevel(0);
+    };
+
+    // Monitor audio levels for silence detection
+    const startAudioMonitoring = (stream) => {
+        try {
+            audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+            analyzerRef.current = audioContextRef.current.createAnalyser();
+            analyzerRef.current.fftSize = 256;
+
+            const source = audioContextRef.current.createMediaStreamSource(stream);
+            source.connect(analyzerRef.current);
+
+            const dataArray = new Uint8Array(analyzerRef.current.frequencyBinCount);
+            const recordingStartTime = Date.now();
+            let hasDetectedSpeech = false; // Track if user has started speaking
+
+            const checkAudioLevel = () => {
+                // Use ref to check if still listening (avoids stale closure)
+                if (!isListeningRef.current) return;
+
+                analyzerRef.current.getByteFrequencyData(dataArray);
+
+                // Calculate average audio level
+                const average = dataArray.reduce((acc, val) => acc + val, 0) / dataArray.length;
+                setAudioLevel(average);
+
+                const now = Date.now();
+                const recordingDuration = now - recordingStartTime;
+
+                // Only check for silence after minimum recording time
+                if (recordingDuration > MIN_RECORDING_TIME) {
+                    if (average > SILENCE_THRESHOLD) {
+                        // User is speaking!
+                        hasDetectedSpeech = true; // Mark that speech has started
+                        lastSpeechTimeRef.current = now; // Update last speech time
+                    } else if (hasDetectedSpeech) {
+                        // Only check for silence AFTER we've detected speech
+                        const silenceDuration = now - lastSpeechTimeRef.current;
+
+                        if (silenceDuration > SILENCE_DURATION) {
+                            console.log('Silence detected after speech, auto-stopping...');
+                            isListeningRef.current = false;
+                            stopListening();
+                            return;
+                        }
+                    }
+                    // If hasDetectedSpeech is false, we're still waiting for user to start speaking
+                    // Don't auto-stop in this case - give user unlimited time to start
+                }
+
+                animationFrameRef.current = requestAnimationFrame(checkAudioLevel);
+            };
+
+            checkAudioLevel();
+        } catch (err) {
+            console.error('Audio monitoring error:', err);
+        }
+    };
+
+    // Start listening
+    const startListening = async () => {
+        try {
+            setError(null);
+            audioChunksRef.current = [];
+
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    sampleRate: 16000,
+                }
+            });
+
+            streamRef.current = stream;
+
+            const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+                ? 'audio/webm;codecs=opus'
+                : 'audio/webm';
+
+            const mediaRecorder = new MediaRecorder(stream, { mimeType });
+            mediaRecorderRef.current = mediaRecorder;
+
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    audioChunksRef.current.push(event.data);
+                }
+            };
+
+            mediaRecorder.onstop = async () => {
+                // Small delay to ensure Media Recorder has fully finalized
+                await new Promise(resolve => setTimeout(resolve, 100));
+
+                stream.getTracks().forEach(track => track.stop());
+                const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+
+                console.log(`📼 Audio: ${audioBlob.size} bytes, ${mimeType}`);
+
+                if (audioBlob.size > 500) { // At least 500 bytes for valid audio
+                    await processVoiceQuery(audioBlob, mimeType);
+                } else {
+                    console.warn('⚠️ Audio too small or empty');
+                    setError('Recording too short. Please speak for at least 1 second.');
+                    setVoiceState('idle');
+                }
+            };
+
+            mediaRecorder.start(100);
+            setVoiceState('listening');
+            isListeningRef.current = true;
+
+            // Start audio monitoring for silence detection
+            startAudioMonitoring(stream);
+
+            // Play a subtle start sound or greeting
+            playGreeting();
+
+        } catch (err) {
+            console.error('Microphone error:', err);
+            setError('Could not access microphone');
+            setVoiceState('idle');
+        }
+    };
+
+    const stopListening = () => {
+        isListeningRef.current = false;
+
+        // Clear idle timeout when user speaks
+        if (idleTimeoutRef.current) {
+            clearTimeout(idleTimeoutRef.current);
+            idleTimeoutRef.current = null;
+        }
+
+        if (animationFrameRef.current) {
+            cancelAnimationFrame(animationFrameRef.current);
+        }
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+            mediaRecorderRef.current.stop();
+        }
+        setVoiceState('thinking');
+        setAudioLevel(0);
+
+        // Failsafe: If stuck in thinking for more than 15 seconds, force reset to idle
+        setTimeout(() => {
+            if (voiceState === 'thinking') {
+                console.warn('⚠️ Stuck in thinking state for 15s, forcing reset to idle');
+                window.speechSynthesis.cancel(); // Force cancel any stuck browser TTS
+                setVoiceState('idle');
+                setCurrentCaption('');
+                startListening(); // Restart listening
+            }
+        }, 15000);
+    };
+
+    const toggleListening = () => {
+        if (voiceState === 'listening') {
+            stopListening();
+        } else if (voiceState === 'idle') {
+            // Only allow manual mic activation when idle
+            startListening();
+        }
+    };
+
+    // Play greeting when starting - ONLY on first interaction
+    const playGreeting = async () => {
+        // Skip if greeting already played this session
+        if (hasPlayedGreetingRef.current) {
+            return;
+        }
+
+        hasPlayedGreetingRef.current = true;
+
+        try {
+            const greetings = ["I'm listening.", "Go ahead.", "Yes, I'm here."];
+            const greeting = greetings[Math.floor(Math.random() * greetings.length)];
+
+            const response = await fetch(`${backendUrl}/api/analytics/rag/text-to-speech`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: greeting })
+            });
+
+            const data = await response.json();
+            if (data.success && data.audio_base64) {
+                playAudio(data.audio_base64, data.mime_type || 'audio/mp3', greeting, false);
+            }
+        } catch (err) {
+            console.log('Greeting skipped');
+        }
+    };
+
+    // Detect if user said yes/no for confirmation
+    const detectConfirmation = (text) => {
+        const textLower = text.toLowerCase().trim();
+        const isConfirm = CONFIRM_KEYWORDS.some(kw => textLower.includes(kw));
+        const isCancel = CANCEL_KEYWORDS.some(kw => textLower.includes(kw));
+
+        // If both detected, cancel takes precedence for safety
+        if (isCancel) return 'cancel';
+        if (isConfirm) return 'confirm';
+        return null;
+    };
+
+    // Check if user changed topic during action flow
+    const detectTopicChange = (text, currentAction) => {
+        if (!currentAction) return false;
+
+        // If user asks a new question (contains question words) during action
+        const questionWords = ['what', 'who', 'where', 'when', 'how', 'why', 'which', 'show me', 'tell me', 'list'];
+        const textLower = text.toLowerCase();
+        return questionWords.some(qw => textLower.startsWith(qw) || textLower.includes(' ' + qw + ' '));
+    };
+
+    // Execute pending action (task creation)
+    const executeAction = async (actionParams) => {
+        try {
+            setCurrentCaption('Creating task...');
+
+            // Map RAG agent params to Task API expected format
+            const taskPayload = {
+                title: actionParams.title,
+                description: actionParams.description,
+                assignedToId: actionParams.assignee_id || actionParams.assignedToId,
+                deadline: actionParams.deadline_iso || actionParams.deadline,
+                priority: actionParams.priority || 'high',
+                points: actionParams.points || 3,
+                source: 'cofounder_rag', // Mark as voice-created task
+                requiresOverride: actionParams.requires_override || false
+            };
+
+            // Only include projectId if it's a project-based task (not miscellaneous)
+            if (!actionParams.skip_project && actionParams.project_id) {
+                taskPayload.projectId = actionParams.project_id;
+            }
+
+            console.log('📝 Creating task via voice:', taskPayload);
+
+            const response = await fetch(`${backendUrl}/api/tasks`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                },
+                body: JSON.stringify(taskPayload)
+            });
+
+            const result = await response.json();
+
+            console.log('📝 Task creation result:', result);
+
+            if (result.success || result._id) {
+                const taskTitle = result.data?.title || actionParams.title;
+                const assignee = result.data?.assignedTo?.firstName || actionParams.assignee_name;
+                return {
+                    success: true,
+                    message: `Task "${taskTitle}" assigned to ${assignee}!`
+                };
+            } else {
+                return {
+                    success: false,
+                    message: result.message || result.error || "Failed to create task"
+                };
+            }
+        } catch (err) {
+            console.error('Task creation error:', err);
+            return { success: false, message: "Error connecting to server" };
+        }
+    };
+
+    // Speak a message
+    const speakMessage = async (text) => {
+        try {
+            const response = await fetch(`${backendUrl}/api/analytics/rag/text-to-speech`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text })
+            });
+
+            const data = await response.json();
+            if (data.success && data.audio_base64) {
+                await playAudioWithCaptions(data.audio_base64, data.mime_type || 'audio/mp3', text);
+            } else {
+                setCurrentCaption(text);
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                setCurrentCaption('');
+            }
+        } catch (err) {
+            setCurrentCaption(text);
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            setCurrentCaption('');
+        }
+    };
+
+    // Process voice query with Streaming
+    const processVoiceQuery = async (audioBlob, mimeType) => {
+        setVoiceState('thinking');
+        setCurrentCaption('Processing audio...');
+        setError(null);
+
+        // Reset audio queue
+        audioChunksRef.current = []; // Reuse for queue or create new ref? 
+        // Let's use a new queue. Since we can't easily add new state variables without full re-render valid inside loop,
+        // we'll use a queue managed within the function scope or a Ref.
+        const audioQueue = [];
+        let isPlaying = false;
+
+        // Internal helper to play queue
+        let retryCount = 0;
+        const playQueue = async () => {
+            if (isPlaying || audioQueue.length === 0) return;
+
+            // If Browser TTS is still speaking, wait (max 20 retries = 2s)
+            if (window.speechSynthesis.speaking && retryCount < 20) {
+                retryCount++;
+                setTimeout(playQueue, 100);
+                return;
+            }
+            // Reset retry count once we proceed
+            retryCount = 0;
+
+            // Force cancel if still speaking (stuck state)
+            if (window.speechSynthesis.speaking) {
+                console.warn('⚠️ Force cancelling stuck browser TTS');
+                window.speechSynthesis.cancel();
+            }
+
+            isPlaying = true;
+
+            const nextAudio = audioQueue.shift(); // { blob, text, is_filler }
+
+            // Check if this is the last chunk
+            const isLastChunk = audioQueue.length === 0;
+
+            try {
+                setVoiceState('speaking');
+                // Play audio with isLast flag
+                await playAudioWithCaptions(nextAudio.base64, nextAudio.mime, nextAudio.text, isLastChunk);
+
+            } catch (err) {
+                console.error("Error playing audio chunk:", err);
+            } finally {
+                isPlaying = false;
+                // Check if more in queue
+                playQueue();
+            }
+        };
+
+        try {
+            const formData = new FormData();
+            const audioFile = new File([audioBlob], 'voice.webm', { type: mimeType });
+            formData.append('audio', audioFile);
+            if (category) formData.append('category', category);
+
+            // Pass conversation state
+            const currentState = conversationStateRef.current;
+            if (currentState) {
+                console.log('🔄 Passing conversation_state:', currentState);
+                formData.append('conversation_state', JSON.stringify(currentState));
+            }
+
+            // Enable Hybrid TTS (Skip server fillers)
+            formData.append('skip_filler', 'true');
+
+            // Note: Updated endpoint to /voice-stream
+            const response = await fetch(`${backendUrl}/api/analytics/rag/voice-stream`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                },
+                body: formData
+            });
+
+            if (!response.ok) throw new Error('Voice stream failed');
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let hasReceivedAudio = false;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop(); // Keep incomplete line
+
+                for (const line of lines) {
+                    if (!line.trim()) continue;
+                    try {
+                        const event = JSON.parse(line);
+                        console.log('📡 Event:', event.type);
+
+                        switch (event.type) {
+                            case 'status':
+                                // Don't overwrite caption if we just set it via Browser TTS
+                                if (voiceState !== 'speaking_local') {
+                                    setCurrentCaption(event.payload);
+                                }
+                                break;
+
+                            case 'transcription':
+                                // setCurrentCaption(`"${event.payload}"`);
+                                // Add to history immediately? No, wait for answer.
+                                break;
+
+                            case 'intent':
+                                console.log('🧠 Intent:', event.payload);
+                                // HYBRID TTS TRIGGER: Speak immediately!
+                                playLocalFiller(event.payload);
+                                setVoiceState('speaking_local'); // Mark as speaking locally
+                                break;
+
+                            case 'action_data':
+                                const actionData = event.payload;
+                                console.log('⚡ Action Data:', actionData);
+
+                                if (actionData.conversation_state) {
+                                    setConversationState(actionData.conversation_state);
+                                    conversationStateRef.current = actionData.conversation_state;
+
+                                    if (actionData.conversation_state.ready_to_execute && actionData.action_params) {
+                                        setPendingAction({
+                                            ready_to_execute: true,
+                                            action_params: actionData.action_params,
+                                            action_type: actionData.action_type
+                                        });
+                                    } else {
+                                        setPendingAction({
+                                            ready_to_execute: false,
+                                            step: actionData.conversation_state.step
+                                        });
+                                    }
+                                }
+                                break;
+
+                            case 'audio':
+                                // Add to queue
+                                hasReceivedAudio = true;
+                                audioQueue.push({
+                                    base64: event.payload.data,
+                                    text: event.payload.text || '',
+                                    is_filler: event.payload.is_filler,
+                                    mime: 'audio/mp3'
+                                });
+                                playQueue();
+                                break;
+
+                            case 'error':
+                                console.error('Stream error:', event.payload);
+                                break;
+                        }
+                    } catch (e) {
+                        console.error('Error parsing event:', e);
+                    }
+                }
+            }
+
+            // End of stream - Safety cleanup
+            console.log('🏁 Stream ended. Received audio:', hasReceivedAudio);
+
+            if (!hasReceivedAudio) {
+                // If no audio came back (e.g. error or empty response), wait for browser TTS to finish
+                console.warn('⚠️ No audio from server. Waiting for browser TTS to finish...');
+
+                // Wait up to 5 seconds for browser TTS to complete
+                const maxWait = 5000;
+                const startWait = Date.now();
+
+                const waitForBrowserTTS = () => {
+                    const elapsed = Date.now() - startWait;
+
+                    // If browser TTS still speaking and haven't exceeded max wait
+                    if (window.speechSynthesis.speaking && elapsed < maxWait) {
+                        setTimeout(waitForBrowserTTS, 100);
+                        return;
+                    }
+
+                    // Force cancel if waited too long
+                    if (window.speechSynthesis.speaking) {
+                        console.warn('⚠️ Force cancelling stuck browser TTS after timeout');
+                        window.speechSynthesis.cancel();
+                    }
+
+                    // Reset to idle and restart listening
+                    console.log('🔄 Resetting to idle and restarting listening...');
+                    setVoiceState('idle');
+                    setCurrentCaption('');
+
+                    // Auto-restart listening for continuous mode
+                    setTimeout(() => {
+                        startListening();
+                    }, 500);
+                };
+
+                waitForBrowserTTS();
+            }
+
+        } catch (err) {
+            console.error('Voice query error:', err);
+            setError(err.message);
+            await speakMessage("I'm having trouble processing that. Please try again.");
+        }
+    };
+
+    // Simple audio playback
+    const playAudio = (base64, mimeType, caption, updateState = true) => {
+        return new Promise((resolve) => {
+            const audioData = atob(base64);
+            const audioArray = new Uint8Array(audioData.length);
+            for (let i = 0; i < audioData.length; i++) {
+                audioArray[i] = audioData.charCodeAt(i);
+            }
+            const blob = new Blob([audioArray], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            const audio = new Audio(url);
+            audioRef.current = audio;
+
+            if (updateState) {
+                setVoiceState('speaking');
+                setCurrentCaption(caption);
+            }
+
+            audio.onended = () => {
+                URL.revokeObjectURL(url);
+                if (updateState) {
+                    setCurrentCaption('');
+                    setVoiceState('idle');
+                }
+                resolve();
+            };
+
+            audio.onerror = () => {
+                URL.revokeObjectURL(url);
+                resolve();
+            };
+
+            audio.play().catch(() => resolve());
+        });
+    };
+
+    // Play audio with streaming captions (line by line)
+    const playAudioWithCaptions = (base64, mimeType, fullText, isLastChunk = true) => {
+        return new Promise((resolve) => {
+            const audioData = atob(base64);
+            const audioArray = new Uint8Array(audioData.length);
+            for (let i = 0; i < audioData.length; i++) {
+                audioArray[i] = audioData.charCodeAt(i);
+            }
+            const blob = new Blob([audioArray], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            const audio = new Audio(url);
+            audioRef.current = audio;
+
+            // Split text into sentences/phrases for captions
+            const sentences = fullText.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [fullText];
+            const wordCount = fullText.split(/\s+/).length;
+            const estimatedDuration = Math.max(2, (wordCount / 150) * 60); // seconds
+            const intervalTime = (estimatedDuration * 1000) / sentences.length;
+
+            let sentenceIndex = 0;
+            let captionInterval;
+
+            setVoiceState('speaking');
+
+            audio.onplay = () => {
+                // Show captions one sentence at a time
+                captionInterval = setInterval(() => {
+                    if (sentenceIndex < sentences.length) {
+                        setCurrentCaption(sentences[sentenceIndex].trim());
+                        sentenceIndex++;
+                    }
+                }, intervalTime);
+            };
+
+            clearInterval(captionInterval);
+            URL.revokeObjectURL(url);
+
+            // Only auto-restart if this is the final audio chunk
+            if (isLastChunk) {
+                console.log('🎤 Last chunk finished, restarting listening...');
+                // Fade out caption and auto-restart for continuous conversation
+                setTimeout(() => {
+                    setCurrentCaption('');
+                    setVoiceState('idle');
+
+                    // Auto-restart listening for continuous conversation mode
+                    startListening();
+
+                    // Set idle timeout - use longer timeout during action flows
+                    const timeout = pendingAction ? ACTION_IDLE_TIMEOUT : IDLE_TIMEOUT;
+                    idleTimeoutRef.current = setTimeout(() => {
+                        stopRecording();
+                        setVoiceState('idle');
+                        setCurrentCaption('Ready to listen. Tap mic to start.');
+                    }, timeout);
+
+                    resolve();
+                }, 1000);
+            } else {
+                // More chunks coming, just resolve
+                console.log('🎤 Chunk finished, waiting for more...');
+                resolve();
+            }
+        };
+
+        audio.onerror = () => {
+            clearInterval(captionInterval);
+            URL.revokeObjectURL(url);
+            setCurrentCaption('');
+            setVoiceState('idle');
+            resolve();
+        };
+
+        audio.play().catch(() => {
+            setCurrentCaption(fullText);
+            setTimeout(() => {
+                setCurrentCaption('');
+                setVoiceState('idle');
+                resolve();
+            }, 3000);
+        });
+    });
+};
+
+// Close and FULLY reset session - next mic trigger starts fresh
+const handleClose = () => {
+    // Stop all active recording/playback
+    stopRecording();
+    stopAudio();
+
+    // Clear all timeouts
+    if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
+    if (idleTimeoutRef.current) clearTimeout(idleTimeoutRef.current);
+    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+
+    // Pass conversation summary to parent before clearing
+    if (onSessionEnd && conversationHistory.length > 0) {
+        onSessionEnd(conversationHistory);
+    }
+
+    // FULL session reset - everything to initial state
+    setConversationHistory([]);
+    setVoiceState('idle');
+    setCurrentCaption('');
+    setConversationState(null);
+    setPendingAction(null);
+    setError(null);
+    setAudioLevel(0);
+
+    // Reset refs
+    audioChunksRef.current = [];
+    hasPlayedGreetingRef.current = false; // Fresh greeting on next session
+    conversationStateRef.current = null; // Clear conversation state ref
+
+    console.log('🔴 Session ended - fully reset');
+    onClose();
+};
+
+// View conversation summary
+const [showSummary, setShowSummary] = useState(false);
+
+if (!isOpen) return null;
+
+// Calculate dynamic ring size based on audio level
+const ringScale = 1 + (audioLevel / 100) * 0.5;
+
+return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+        {/* Backdrop */}
+        <div
+            className="absolute inset-0 bg-black/80 backdrop-blur-sm transition-opacity duration-300"
+            onClick={handleClose}
+        />
+
+        {/* Modal */}
+        <div className="relative z-10 flex flex-col items-center">
+            {/* Close button */}
+            <button
+                onClick={handleClose}
+                className="absolute top-4 right-4 p-2 text-white/60 hover:text-white transition-colors"
+            >
+                <X className="w-6 h-6" />
+            </button>
+
+            {/* Summary toggle */}
+            {conversationHistory.length > 0 && (
+                <button
+                    onClick={() => setShowSummary(!showSummary)}
+                    className="absolute top-4 left-4 p-2 text-white/60 hover:text-white transition-colors flex items-center gap-2"
+                >
+                    <MessageSquare className="w-5 h-5" />
+                    <span className="text-sm">{conversationHistory.length}</span>
+                </button>
+            )}
+
+            {/* Summary panel - positioned to the left of center to avoid mic overlap */}
+            {showSummary && (
+                <div className="absolute top-16 right-[calc(50%+100px)] w-80 max-h-96 overflow-y-auto bg-white/10 backdrop-blur-md rounded-xl p-4 text-white text-sm">
+                    <h3 className="font-semibold mb-3">Conversation Summary</h3>
+                    {conversationHistory.map((exchange, idx) => (
+                        <div key={idx} className="mb-4 pb-3 border-b border-white/10 last:border-0">
+                            <p className="text-blue-300 mb-1">You: {exchange.user}</p>
+                            <p className="text-gray-300">AI: {exchange.assistant}</p>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* Main orb/button with audio level visualization */}
+            <div className="relative mb-8">
+                {/* Audio level responsive rings */}
+                {voiceState === 'listening' && (
+                    <>
+                        <div
+                            className="absolute inset-0 rounded-full bg-blue-500 opacity-20 transition-transform duration-100"
+                            style={{ transform: `scale(${ringScale + 0.5})` }}
+                        />
+                        <div
+                            className="absolute inset-0 rounded-full bg-blue-400 opacity-30 transition-transform duration-100"
+                            style={{ transform: `scale(${ringScale + 0.3})` }}
+                        />
+                        <div
+                            className="absolute inset-0 rounded-full bg-blue-300 opacity-40 transition-transform duration-100"
+                            style={{ transform: `scale(${ringScale})` }}
+                        />
+                    </>
+                )}
+
+                {/* Animated rings for speaking state */}
+                {voiceState === 'speaking' && (
+                    <>
+                        <div className="absolute inset-0 rounded-full bg-purple-500 animate-ping opacity-20"
+                            style={{ transform: 'scale(1.5)' }}
+                        />
+                        <div className="absolute inset-0 rounded-full bg-purple-400 animate-pulse opacity-30"
+                            style={{ transform: 'scale(1.3)' }}
+                        />
+                    </>
+                )}
+
+                {/* Main button */}
+                <button
+                    onClick={toggleListening}
+                    disabled={voiceState === 'thinking'}
+                    className={`
+                            relative w-32 h-32 rounded-full flex items-center justify-center
+                            transition-all duration-500 ease-out
+                            ${voiceState === 'idle'
+                            ? 'bg-gradient-to-br from-gray-700 to-gray-800 hover:from-gray-600 hover:to-gray-700'
+                            : voiceState === 'listening'
+                                ? 'bg-gradient-to-br from-blue-500 to-blue-700 shadow-lg shadow-blue-500/50'
+                                : voiceState === 'thinking'
+                                    ? 'bg-gradient-to-br from-yellow-500 to-orange-600 animate-pulse'
+                                    : 'bg-gradient-to-br from-purple-500 to-pink-600 shadow-lg shadow-purple-500/50'
+                        }
+                            ${voiceState === 'thinking' ? 'cursor-wait' : 'cursor-pointer'}
+                        `}
+                >
+                    {voiceState === 'listening' ? (
+                        <Mic className="w-12 h-12 text-white" />
+                    ) : voiceState === 'thinking' ? (
+                        <div className="flex gap-1">
+                            <div className="w-3 h-3 bg-white rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                            <div className="w-3 h-3 bg-white rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                            <div className="w-3 h-3 bg-white rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                        </div>
+                    ) : voiceState === 'speaking' ? (
+                        <Volume2 className="w-12 h-12 text-white animate-pulse" />
+                    ) : (
+                        <Mic className="w-12 h-12 text-white/80" />
+                    )}
+                </button>
+            </div>
+
+            {/* State label with audio level indicator */}
+            <div className="flex flex-col items-center gap-2 mb-4">
+                <p className={`text-lg font-medium transition-all duration-300 ${voiceState === 'listening' ? 'text-blue-400' :
+                    voiceState === 'thinking' ? 'text-yellow-400' :
+                        voiceState === 'speaking' ? 'text-purple-400' :
+                            pendingAction ? 'text-orange-400' :
+                                'text-gray-400'
+                    }`}>
+                    {voiceState === 'idle' && (pendingAction ? 'Creating task...' : 'Tap to speak')}
+                    {voiceState === 'listening' && 'Listening...'}
+                    {voiceState === 'thinking' && 'Thinking...'}
+                    {voiceState === 'speaking' && ''}
+                </p>
+
+                {/* Audio level meter during listening */}
+                {voiceState === 'listening' && (
+                    <div className="flex items-center gap-1">
+                        {[...Array(10)].map((_, i) => (
+                            <div
+                                key={i}
+                                className={`w-1 h-${i + 2} rounded-full transition-all duration-100 ${audioLevel > (i * 10) ? 'bg-blue-400' : 'bg-gray-600'
+                                    }`}
+                            />
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {/* Caption display */}
+            <div className="h-24 w-96 flex items-center justify-center">
+                <p className={`
+                        text-center text-white text-lg px-6 py-3 rounded-xl
+                        transition-all duration-500 ease-out
+                        ${currentCaption
+                        ? 'opacity-100 transform translate-y-0 bg-white/10 backdrop-blur-sm'
+                        : 'opacity-0 transform translate-y-4'
+                    }
+                    `}>
+                    {currentCaption}
+                </p>
+            </div>
+
+            {/* Error display - enhanced with icon and helpful message */}
+            {error && (
+                <div className="flex flex-col items-center gap-2 mt-4 max-w-md">
+                    <div className="flex items-center gap-2 text-red-400">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <p className="text-sm font-medium">{error}</p>
+                    </div>
+                    <p className="text-xs text-gray-400 text-center">
+                        💡 Tip: Speak clearly and wait for "Listening..." before talking
+                    </p>
+                </div>
+            )}
+
+            {/* End Call button */}
+            <button
+                onClick={handleClose}
+                className="mt-6 px-8 py-3 bg-red-500/20 hover:bg-red-500/30 text-red-400 hover:text-red-300 rounded-full font-medium transition-all duration-300 flex items-center gap-2 backdrop-blur-sm border border-red-500/30"
+            >
+                <X className="w-5 h-5" />
+                End Call
+            </button>
+
+            {/* Hint - minimal */}
+            <p className="text-gray-500 text-sm mt-8">
+                {voiceState === 'idle' ? 'Press ESC to close' : ''}
+            </p>
+        </div>
+    </div>
+);
+};
+
+export default VoiceAgentModal;

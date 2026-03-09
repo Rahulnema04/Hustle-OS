@@ -1,0 +1,485 @@
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+    Users,
+    Search,
+    Plus,
+    Edit,
+    Eye,
+    Mail,
+    Phone,
+    Calendar,
+    Briefcase,
+    MapPin,
+    Filter,
+    Download,
+    UserCheck,
+    UserX,
+    X,
+    FileText,
+    Award
+} from 'lucide-react';
+import api from '../../utils/api';
+import toast from 'react-hot-toast';
+
+const EmployeeRecords = () => {
+    const navigate = useNavigate();
+    const [employees, setEmployees] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [searchTerm, setSearchTerm] = useState('');
+    const [filterDepartment, setFilterDepartment] = useState('all');
+    const [filterRole, setFilterRole] = useState('all');
+    const [filterStatus, setFilterStatus] = useState('all');
+    const [selectedEmployee, setSelectedEmployee] = useState(null);
+    const [showDetailsModal, setShowDetailsModal] = useState(false);
+    const [showAddModal, setShowAddModal] = useState(false);
+
+    const [stats, setStats] = useState({
+        total: 0,
+        active: 0,
+        inactive: 0,
+        departments: 0
+    });
+
+    useEffect(() => {
+        fetchEmployees();
+
+        // Auto-refresh every 30 seconds
+        const refreshInterval = setInterval(fetchEmployees, 30000);
+        return () => clearInterval(refreshInterval);
+    }, []);
+
+    const fetchEmployees = async () => {
+        try {
+            const response = await api.get('/users');
+
+            if (response.data.success) {
+                const employeeData = response.data.data;
+                setEmployees(employeeData);
+
+                // Calculate statistics
+                calculateStats(employeeData);
+            }
+        } catch (error) {
+            console.error('Error fetching employees:', error);
+            if (employees.length === 0) {
+                toast.error('Failed to load employee data');
+            }
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const calculateStats = (data) => {
+        // Safety check: ensure data is an array
+        if (!Array.isArray(data)) {
+            setStats({ total: 0, active: 0, inactive: 0, departments: 0 });
+            return;
+        }
+
+        const active = data.filter(emp => emp.status === 'active' || !emp.status).length;
+        const departments = new Set(data.map(emp => emp.department).filter(Boolean)).size;
+
+        setStats({
+            total: data.length,
+            active,
+            inactive: data.length - active,
+            departments
+        });
+    };
+
+    // Get unique departments and roles for filters - with safety checks
+    const departments = Array.isArray(employees) ? [...new Set(employees.map(emp => emp.department).filter(Boolean))] : [];
+    const roles = Array.isArray(employees) ? [...new Set(employees.map(emp => emp.role).filter(Boolean))] : [];
+
+    // Filter employees
+    const filteredEmployees = (Array.isArray(employees) ? employees : []).filter(emp => {
+        const matchesSearch =
+            `${emp.firstName} ${emp.lastName}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            emp.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            emp.employeeId?.toLowerCase().includes(searchTerm.toLowerCase());
+
+        const matchesDepartment = filterDepartment === 'all' || emp.department === filterDepartment;
+        const matchesRole = filterRole === 'all' || emp.role === filterRole;
+        const matchesStatus = filterStatus === 'all' ||
+            (filterStatus === 'active' && (emp.status === 'active' || !emp.status)) ||
+            (filterStatus === 'inactive' && emp.status === 'inactive');
+
+        return matchesSearch && matchesDepartment && matchesRole && matchesStatus;
+    });
+
+    const handleViewDetails = (employee) => {
+        setSelectedEmployee(employee);
+        setShowDetailsModal(true);
+    };
+
+    const getStatusBadge = (status) => {
+        const isActive = status === 'active' || !status;
+        return (
+            <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                }`}>
+                {isActive ? <UserCheck className="h-3 w-3 mr-1" /> : <UserX className="h-3 w-3 mr-1" />}
+                {isActive ? 'Active' : 'Inactive'}
+            </span>
+        );
+    };
+
+    const formatDate = (dateString) => {
+        if (!dateString) return 'N/A';
+        return new Date(dateString).toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric'
+        });
+    };
+
+    return (
+        <div className="space-y-6">
+            {/* Header */}
+            <div className="flex items-center justify-between">
+                <div>
+                    <h1 className="text-3xl font-bold text-gray-900">Employee Records</h1>
+                    <p className="text-gray-600 mt-1">Manage all employee information and records</p>
+                </div>
+                <button
+                    onClick={() => setShowAddModal(true)}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                    <Plus className="h-5 w-5" />
+                    Add Employee
+                </button>
+            </div>
+
+            {/* Statistics Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg p-6 text-white shadow-lg">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <p className="text-blue-100 text-sm font-medium">Total Employees</p>
+                            <p className="text-3xl font-bold mt-2">{stats.total}</p>
+                        </div>
+                        <div className="h-12 w-12 bg-white bg-opacity-20 rounded-lg flex items-center justify-center">
+                            <Users className="h-6 w-6" />
+                        </div>
+                    </div>
+                </div>
+
+                <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-lg p-6 text-white shadow-lg">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <p className="text-green-100 text-sm font-medium">Active</p>
+                            <p className="text-3xl font-bold mt-2">{stats.active}</p>
+                        </div>
+                        <div className="h-12 w-12 bg-white bg-opacity-20 rounded-lg flex items-center justify-center">
+                            <UserCheck className="h-6 w-6" />
+                        </div>
+                    </div>
+                </div>
+
+                <div className="bg-gradient-to-br from-gray-500 to-gray-600 rounded-lg p-6 text-white shadow-lg">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <p className="text-gray-100 text-sm font-medium">Inactive</p>
+                            <p className="text-3xl font-bold mt-2">{stats.inactive}</p>
+                        </div>
+                        <div className="h-12 w-12 bg-white bg-opacity-20 rounded-lg flex items-center justify-center">
+                            <UserX className="h-6 w-6" />
+                        </div>
+                    </div>
+                </div>
+
+                <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-lg p-6 text-white shadow-lg">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <p className="text-purple-100 text-sm font-medium">Departments</p>
+                            <p className="text-3xl font-bold mt-2">{stats.departments}</p>
+                        </div>
+                        <div className="h-12 w-12 bg-white bg-opacity-20 rounded-lg flex items-center justify-center">
+                            <Briefcase className="h-6 w-6" />
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Filters and Search */}
+            <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    {/* Search */}
+                    <div className="md:col-span-1">
+                        <div className="relative">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                            <input
+                                type="text"
+                                placeholder="Search employees..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                        </div>
+                    </div>
+
+                    {/* Department Filter */}
+                    <div>
+                        <select
+                            value={filterDepartment}
+                            onChange={(e) => setFilterDepartment(e.target.value)}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                            <option value="all">All Departments</option>
+                            {departments.map(dept => (
+                                <option key={dept} value={dept}>{dept}</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    {/* Role Filter */}
+                    <div>
+                        <select
+                            value={filterRole}
+                            onChange={(e) => setFilterRole(e.target.value)}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                            <option value="all">All Roles</option>
+                            {roles.map(role => (
+                                <option key={role} value={role}>{role.replace('-', ' ')}</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    {/* Status Filter */}
+                    <div>
+                        <select
+                            value={filterStatus}
+                            onChange={(e) => setFilterStatus(e.target.value)}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                            <option value="all">All Status</option>
+                            <option value="active">Active</option>
+                            <option value="inactive">Inactive</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            {/* Employee Table */}
+            {loading ? (
+                <div className="flex items-center justify-center py-12">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+                </div>
+            ) : filteredEmployees.length === 0 ? (
+                <div className="bg-white rounded-lg p-12 text-center shadow-sm border border-gray-200">
+                    <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">No employees found</h3>
+                    <p className="text-gray-600">
+                        {searchTerm ? 'Try adjusting your search or filters' : 'Add your first employee to get started'}
+                    </p>
+                </div>
+            ) : (
+                <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-gray-50">
+                                <tr>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Employee
+                                    </th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Role
+                                    </th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Department
+                                    </th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Contact
+                                    </th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Status
+                                    </th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Actions
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                                {filteredEmployees.map((employee) => (
+                                    <tr key={employee._id} className="hover:bg-gray-50 transition-colors">
+                                        <td className="px-6 py-4 whitespace-nowrap">
+                                            <div className="flex items-center">
+                                                <div className="h-10 w-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white font-bold">
+                                                    {employee.firstName?.charAt(0)}{employee.lastName?.charAt(0)}
+                                                </div>
+                                                <div className="ml-4">
+                                                    <div className="text-sm font-medium text-gray-900">
+                                                        {employee.firstName} {employee.lastName}
+                                                    </div>
+                                                    <div className="text-sm text-gray-500">{employee.employeeId || 'N/A'}</div>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap">
+                                            <div className="text-sm text-gray-900 capitalize">
+                                                {employee.role?.replace('-', ' ') || 'N/A'}
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap">
+                                            <div className="text-sm text-gray-900">{employee.department || 'N/A'}</div>
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap">
+                                            <div className="text-sm text-gray-900">{employee.email}</div>
+                                            {employee.phoneNumber && (
+                                                <div className="text-sm text-gray-500">{employee.phoneNumber}</div>
+                                            )}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap">
+                                            {getStatusBadge(employee.status)}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                            <div className="flex items-center gap-2">
+                                                <button
+                                                    onClick={() => handleViewDetails(employee)}
+                                                    className="text-blue-600 hover:text-blue-900"
+                                                    title="View Details"
+                                                >
+                                                    <Eye className="h-5 w-5" />
+                                                </button>
+                                                <button
+                                                    onClick={() => navigate(`/profile?userId=${employee._id}`)}
+                                                    className="text-purple-600 hover:text-purple-900"
+                                                    title="View Profile"
+                                                >
+                                                    <FileText className="h-5 w-5" />
+                                                </button>
+                                                <button
+                                                    className="text-green-600 hover:text-green-900"
+                                                    title="Send Email"
+                                                >
+                                                    <Mail className="h-5 w-5" />
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+
+            {/* Results Count */}
+            {!loading && filteredEmployees.length > 0 && (
+                <div className="text-center text-sm text-gray-600">
+                    Showing {filteredEmployees.length} of {employees.length} employees
+                </div>
+            )}
+
+            {/* Employee Details Modal */}
+            {showDetailsModal && selectedEmployee && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+                        <div className="p-6">
+                            <div className="flex items-center justify-between mb-6">
+                                <h2 className="text-2xl font-bold text-gray-900">Employee Details</h2>
+                                <button
+                                    onClick={() => setShowDetailsModal(false)}
+                                    className="text-gray-400 hover:text-gray-600"
+                                >
+                                    <X className="h-6 w-6" />
+                                </button>
+                            </div>
+
+                            <div className="space-y-6">
+                                {/* Personal Information */}
+                                <div>
+                                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Personal Information</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="text-sm text-gray-500">Full Name</label>
+                                            <p className="text-gray-900 font-medium">
+                                                {selectedEmployee.firstName} {selectedEmployee.lastName}
+                                            </p>
+                                        </div>
+                                        <div>
+                                            <label className="text-sm text-gray-500">Employee ID</label>
+                                            <p className="text-gray-900 font-medium">{selectedEmployee.employeeId || 'N/A'}</p>
+                                        </div>
+                                        <div>
+                                            <label className="text-sm text-gray-500">Email</label>
+                                            <p className="text-gray-900 font-medium">{selectedEmployee.email}</p>
+                                        </div>
+                                        <div>
+                                            <label className="text-sm text-gray-500">Phone</label>
+                                            <p className="text-gray-900 font-medium">{selectedEmployee.phoneNumber || 'N/A'}</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Employment Information */}
+                                <div>
+                                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Employment Information</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="text-sm text-gray-500">Role</label>
+                                            <p className="text-gray-900 font-medium capitalize">
+                                                {selectedEmployee.role?.replace('-', ' ') || 'N/A'}
+                                            </p>
+                                        </div>
+                                        <div>
+                                            <label className="text-sm text-gray-500">Department</label>
+                                            <p className="text-gray-900 font-medium">{selectedEmployee.department || 'N/A'}</p>
+                                        </div>
+                                        <div>
+                                            <label className="text-sm text-gray-500">Join Date</label>
+                                            <p className="text-gray-900 font-medium">{formatDate(selectedEmployee.createdAt)}</p>
+                                        </div>
+                                        <div>
+                                            <label className="text-sm text-gray-500">Status</label>
+                                            <div>{getStatusBadge(selectedEmployee.status)}</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Performance Summary */}
+                                <div>
+                                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Performance Summary</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="bg-purple-50 p-4 rounded-lg">
+                                            <div className="flex items-center gap-2 mb-2">
+                                                <Award className="h-5 w-5 text-purple-600" />
+                                                <span className="text-sm text-gray-600">Total Points</span>
+                                            </div>
+                                            <p className="text-2xl font-bold text-purple-600">{selectedEmployee.totalPoints || 0}</p>
+                                        </div>
+                                        <div className="bg-blue-50 p-4 rounded-lg">
+                                            <div className="flex items-center gap-2 mb-2">
+                                                <Briefcase className="h-5 w-5 text-blue-600" />
+                                                <span className="text-sm text-gray-600">Active Tasks</span>
+                                            </div>
+                                            <p className="text-2xl font-bold text-blue-600">{selectedEmployee.activeTasks || 0}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="flex gap-3 mt-6 pt-6 border-t border-gray-200">
+                                <button
+                                    onClick={() => navigate(`/profile?userId=${selectedEmployee._id}`)}
+                                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                                >
+                                    View Full Profile
+                                </button>
+                                <button
+                                    onClick={() => setShowDetailsModal(false)}
+                                    className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+                                >
+                                    Close
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
+export default EmployeeRecords;

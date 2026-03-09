@@ -1,0 +1,162 @@
+# ============================================
+# Operating System Files
+# ============================================
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+
+# ============================================
+# Node.js / JavaScript
+# ============================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+pnpm-lock.yaml
+/.pnp
+.pnp.js
+
+# ============================================
+# Build / Bundlers / Caches
+# ============================================
+.vite/
+.parcel-cache/
+.turbo/
+.cache/
+dist/
+build/
+public/build/
+
+# ============================================
+# Python - Cache & Compiled Files
+# ============================================
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+*.pyd
+*.so
+
+# Python virtual environments
+venv/
+env/
+.venv/
+ENV/
+venv.bak/
+env.bak/
+# Only ignore hidden auto-llm directories (virtual environments)
+# This allows the Auto-LLM/ project directory to be tracked
+.auto-llm/
+.venv-auto-llm/
+.auto_llm/
+
+# Virtualenv / pipenv
+Pipfile.lock
+
+# Django / Flask stuff
+instance/
+.webassets-cache
+
+# Testing / coverage
+.pytest_cache/
+htmlcov/
+coverage/
+coverage.*
+nosetests.xml
+coverage.xml
+*.cover
+
+# ============================================
+# Logs
+# ============================================
+logs/
+logs
+*.log
+
+# ============================================
+# Environment Files
+# ============================================
+# Ignore everywhere except Auto-LLM, frontend, backend
+
+
+
+# But track .env and config.env files in Auto-LLM, frontend, and backend
+
+
+# ============================================
+# IDEs & Editors
+# ============================================
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ============================================
+# Temporary Files
+# ============================================
+*.tmp
+*.temp
+
+# ============================================
+# Database
+# ============================================
+*.sqlite3
+
+# ============================================
+# Auto-generated / Output Files
+# ============================================
+*_tasks.txt
+output/
+generated/
+
+
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environment
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Test files (keep in tests/ folder only)
+test_*.py
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# TTS cache (regenerated automatically)
+voice/.tts_cache/
+
+# Database
+*.db
+chroma_db/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
