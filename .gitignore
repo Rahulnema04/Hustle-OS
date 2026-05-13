@@ -80,11 +80,12 @@ logs
 # ============================================
 # Environment Files
 # ============================================
-# Ignore everywhere except Auto-LLM, frontend, backend
-
-
-
-# But track .env and config.env files in Auto-LLM, frontend, and backend
+# NEVER commit real .env files — they contain secrets
+.env
+.env.*
+!.env.example
+config.env
+!config.env.example
 
 
 # ============================================

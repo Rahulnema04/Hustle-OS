@@ -2,6 +2,7 @@
   "name": "hustle-system-frontend",
   "version": "1.0.0",
   "description": "Frontend for The Hustle System with role-based authentication",
+  "author": "Rahul Nema",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
