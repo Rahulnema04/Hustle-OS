@@ -15,7 +15,8 @@ class STTCorrector:
             base_url="https://openrouter.ai/api/v1",
             api_key=os.getenv("OPENROUTER_API_KEY")
         )
-        self.model = "openai/gpt-4o-mini"  # Fast and cheap
+        # Use free model from env, fallback to a reliable free OpenRouter model
+        self.model = os.getenv("ANALYTICS_MODEL", "meta-llama/llama-4-maverick:free")
         
         # Common business domain corrections
         self.correction_prompt = """You are fixing speech-to-text errors in business queries.

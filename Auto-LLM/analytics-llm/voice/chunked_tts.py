@@ -11,13 +11,12 @@ for incremental delivery. This gives the perception of faster response
 even if total synthesis time is similar.
 """
 
-import asyncio
 import re
 import base64
 import os
 import tempfile
 import uuid
-from typing import Dict, Any, List, Generator, AsyncGenerator, Optional
+from typing import Dict, Any, List, Generator, Optional
 
 
 class ChunkedTTS:
@@ -51,22 +50,17 @@ class ChunkedTTS:
     
     def __init__(self, voice: str = None):
         """Initialize with optional voice override."""
-        self.voice = voice or "en-IN-NeerjaNeural"
-        self._edge_tts = None
+        self.voice = voice  # ElevenLabs voice preset (e.g. 'female_warm')
+        self._tts = None
         self._temp_dir = os.path.join(tempfile.gettempdir(), 'voice_agent_chunks')
         os.makedirs(self._temp_dir, exist_ok=True)
     
-    def _get_edge_tts(self):
-        """Lazy import edge-tts."""
-        if self._edge_tts is None:
-            try:
-                import edge_tts
-                self._edge_tts = edge_tts
-            except ImportError:
-                raise ImportError(
-                    "edge-tts not installed. Install with: pip install edge-tts"
-                )
-        return self._edge_tts
+    def _get_tts(self):
+        """Lazy load ElevenLabs TTS singleton."""
+        if self._tts is None:
+            from voice.elevenlabs_tts import get_elevenlabs_tts
+            self._tts = get_elevenlabs_tts(self.voice or 'female_warm')
+        return self._tts
     
     def split_for_speech(self, text: str, include_ack: bool = False) -> List[Dict[str, str]]:
         """
@@ -157,49 +151,9 @@ class ChunkedTTS:
         
         return sentences
     
-    async def _synthesize_chunk_async(
-        self,
-        text: str,
-        chunk_id: str
-    ) -> Dict[str, Any]:
-        """Async synthesis of a single chunk."""
-        edge_tts = self._get_edge_tts()
-        
-        output_path = os.path.join(self._temp_dir, f"chunk_{chunk_id}.mp3")
-        
-        try:
-            communicate = edge_tts.Communicate(text, self.voice)
-            await communicate.save(output_path)
-            
-            # Read and encode
-            with open(output_path, 'rb') as f:
-                audio_data = f.read()
-            
-            audio_base64 = base64.b64encode(audio_data).decode('utf-8')
-            
-            # Cleanup
-            try:
-                os.remove(output_path)
-            except:
-                pass
-            
-            return {
-                "success": True,
-                "audio_base64": audio_base64,
-                "format": "mp3",
-                "mime_type": "audio/mp3",
-                "text_length": len(text)
-            }
-            
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e)
-            }
-    
     def synthesize_chunk(self, text: str, chunk_id: str = None) -> Dict[str, Any]:
         """
-        Synchronously synthesize a single chunk.
+        Synthesize a single text chunk using ElevenLabs.
         
         Args:
             text: Text to synthesize
@@ -209,15 +163,26 @@ class ChunkedTTS:
             Dictionary with audio data or error
         """
         chunk_id = chunk_id or uuid.uuid4().hex[:8]
+        output_path = os.path.join(self._temp_dir, f"chunk_{chunk_id}.mp3")
         
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
         try:
-            return loop.run_until_complete(
-                self._synthesize_chunk_async(text, chunk_id)
-            )
-        finally:
-            loop.close()
+            tts = self._get_tts()
+            result = tts.synthesize(text, output_path)
+            
+            # Cleanup temp file
+            try:
+                if os.path.exists(output_path):
+                    os.remove(output_path)
+            except:
+                pass
+            
+            return result
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
     
     def synthesize_streaming(
         self,

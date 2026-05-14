@@ -55,14 +55,14 @@ class ParallelVoicePipeline:
     def __init__(self):
         """Initialize parallel pipeline components."""
         from voice.speech_to_text import SpeechToText
-        from voice.text_to_speech import TextToSpeech
+        from voice.elevenlabs_tts import get_elevenlabs_tts
         from voice.conversationalist import ConversationalRewriter
         from voice.instant_responses import get_instant_response_manager
         from rag.rag_agent import RAGAgent
         
         # Core components (reuse singletons where possible)
         self.stt = SpeechToText()
-        self.tts = TextToSpeech()
+        self.tts = get_elevenlabs_tts()
         self.intent_handler = IntentHandler()
         self.rewriter = ConversationalRewriter()
         self.rag_agent = RAGAgent()

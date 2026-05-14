@@ -6,8 +6,8 @@ load_dotenv()
 class AnalyticsLLMConfig:
     """Configuration for Analytics LLM"""
     # OpenRouter API Configuration
-    OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "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")
-    MODEL_NAME = os.getenv("ANALYTICS_MODEL", "openai/gpt-4o-mini")
+    OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+    MODEL_NAME = os.getenv("ANALYTICS_MODEL", "meta-llama/llama-4-maverick:free")
     TEMPERATURE = float(os.getenv("ANALYTICS_TEMPERATURE", "0.3"))
     MAX_TOKENS = int(os.getenv("ANALYTICS_MAX_TOKENS", "300"))  # Reduced for fast voice responses
     
@@ -15,7 +15,7 @@ class AnalyticsLLMConfig:
     OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
     
     # MongoDB Atlas connection
-    MONGODB_URI = os.getenv("MONGODB_URI", "mongodb+srv://sourabhsompandey_db_user:sourabh01@hustledatabase.fsycdzj.mongodb.net/?retryWrites=true&w=majority&appName=hustledatabase")
+    MONGODB_URI = os.getenv("MONGODB_URI", "")
     DB_NAME = os.getenv("DB_NAME", "test")
     
     # Backend API URL for action execution

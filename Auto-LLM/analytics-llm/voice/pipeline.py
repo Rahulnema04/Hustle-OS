@@ -5,7 +5,7 @@ import threading
 from typing import Generator, Dict, Any, Optional
 
 from voice.speech_to_text import SpeechToText
-from voice.text_to_speech import TextToSpeech
+from voice.elevenlabs_tts import get_elevenlabs_tts
 from voice.intent_handler import IntentHandler
 from voice.conversationalist import ConversationalRewriter
 from rag.rag_agent import RAGAgent
@@ -18,7 +18,7 @@ class VoicePipeline:
     
     def __init__(self):
         self.stt = SpeechToText()
-        self.tts = TextToSpeech()
+        self.tts = get_elevenlabs_tts()
         self.intent_handler = IntentHandler()
         self.rewriter = ConversationalRewriter()
         # RAG Agent is heavy, lazy load or use shared instance
@@ -79,7 +79,9 @@ class VoicePipeline:
                 pass
             else:
                 # Synthesize filler (fast, no heavy processing)
-                filler_audio = self.tts.synthesize(filler_phrase)
+                import tempfile, uuid, os
+                _tmp = os.path.join(tempfile.gettempdir(), f"filler_{uuid.uuid4().hex[:8]}.mp3")
+                filler_audio = self.tts.synthesize(filler_phrase, _tmp)
                 if filler_audio['success']:
                     yield self._event("audio", {
                         "data": filler_audio['audio_base64'],
@@ -125,7 +127,9 @@ class VoicePipeline:
         # 6. Final TTS
         yield self._event("status", "Speaking...")
         
-        final_audio = self.tts.synthesize(final_answer_text)
+        import tempfile, uuid, os
+        _out = os.path.join(tempfile.gettempdir(), f"tts_{uuid.uuid4().hex[:8]}.mp3")
+        final_audio = self.tts.synthesize(final_answer_text, _out)
         
         if final_audio['success']:
             yield self._event("audio", {

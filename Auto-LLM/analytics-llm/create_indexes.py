@@ -12,7 +12,7 @@ import time
 load_dotenv()
 
 # MongoDB connection
-MONGODB_URI = os.getenv("MONGODB_URI", "mongodb+srv://sourabhsompandey_db_user:sourabh01@hustledatabase.fsycdzj.mongodb.net/?retryWrites=true&w=majority&appName=hustledatabase")
+MONGODB_URI = os.getenv("MONGODB_URI", "")
 DB_NAME = os.getenv("DB_NAME", "test")
 
 def create_indexes():

@@ -15,9 +15,16 @@ const Login = () => {
   const {
     register,
     handleSubmit,
+    setValue,
     formState: { errors },
     setError,
   } = useForm();
+
+  const handleQuickLogin = (email, password) => {
+    setValue('email', email);
+    setValue('password', password);
+    toast.success(`Autofilled credentials for ${email}`, { duration: 2000 });
+  };
 
   const onSubmit = async (data) => {
     const result = await login(data.email, data.password);
@@ -298,6 +305,48 @@ const Login = () => {
                     </>
                   )}
                 </button>
+              </motion.div>
+
+              {/* Quick Login Tabs for Demonstration */}
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.9 }}
+                className="mt-6 pt-6 border-t border-zinc-800/50"
+              >
+                <div className="text-center mb-3">
+                  <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Quick Demo Login</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <button
+                    type="button"
+                    onClick={() => handleQuickLogin('ceo@hustlesystem.com', 'krishna123')}
+                    className="py-1.5 px-2 text-xs font-medium rounded-lg text-white bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 transition-colors"
+                  >
+                    CEO
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleQuickLogin('founder@hustlesystem.com', 'krishna123')}
+                    className="py-1.5 px-2 text-xs font-medium rounded-lg text-white bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 transition-colors"
+                  >
+                    Founder
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleQuickLogin('manageronetwo@example.com', 'password123')}
+                    className="py-1.5 px-2 text-xs font-medium rounded-lg text-white bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 transition-colors"
+                  >
+                    Manager
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleQuickLogin('developertest@example.com', 'password123')}
+                    className="py-1.5 px-2 text-xs font-medium rounded-lg text-white bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 transition-colors"
+                  >
+                    Employee
+                  </button>
+                </div>
               </motion.div>
 
               <div className="text-center mt-6">
