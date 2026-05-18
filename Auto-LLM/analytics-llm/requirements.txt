@@ -33,11 +33,8 @@ aiofiles>=23.0.0              # Async file operations
 # On CPU: ~6-8 seconds for transcription
 faster-whisper>=1.0.0
 
-# PyTorch with CUDA support
-# NOTE: For GPU support, install PyTorch with CUDA separately:
-# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-# OR for CUDA 12.1:
-# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+# Install CPU-only PyTorch to prevent Out-Of-Memory errors on Render free tier
+--extra-index-url https://download.pytorch.org/whl/cpu
 torch>=2.1.0
 
 # CTranslate2 for optimized Whisper inference
