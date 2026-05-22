@@ -266,6 +266,7 @@ app.use(limiter);
 
 // ✅ CORS configuration (clean & fixed)
 const allowedOrigins = [
+  // Local dev
   'http://localhost:3000',
   'http://localhost:3001',
   'http://localhost:5173',
@@ -274,9 +275,13 @@ const allowedOrigins = [
   'http://127.0.0.1:3000',
   'http://127.0.0.1:3001',
   'http://127.0.0.1:5173',
+  // Legacy server
   'http://193.203.160.42:9000',
   'http://HustleOs.thehustlehouseofficial.com',
   'https://HustleOs.thehustlehouseofficial.com',
+  // Production — Vercel frontend (hardcoded as safety net)
+  'https://hustle-os-ten.vercel.app',
+  // Env-driven (set FRONTEND_URL on Render)
   process.env.FRONTEND_URL
 ].filter(Boolean);
 
