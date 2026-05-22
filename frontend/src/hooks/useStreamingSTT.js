@@ -5,7 +5,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { io } from 'socket.io-client';
 
-const SOCKET_URL = 'http://localhost:5002';
+const SOCKET_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5002';
 const CHUNK_INTERVAL_MS = 2000; // Send chunks every 2 seconds
 
 export const useStreamingSTT = () => {

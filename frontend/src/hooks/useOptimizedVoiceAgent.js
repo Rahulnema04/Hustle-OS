@@ -14,7 +14,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 
 // WebSocket configuration
-const WS_URL = import.meta.env.VITE_VOICE_WS_URL || 'ws://localhost:5002/ws/voice';
+const WS_URL = import.meta.env.VITE_VOICE_WS_URL || (import.meta.env.VITE_BACKEND_URL ? import.meta.env.VITE_BACKEND_URL.replace('http://', 'ws://').replace('https://', 'wss://') + '/ws/voice' : '');
 const RECONNECT_DELAY_MS = 1000;
 const MAX_RECONNECT_DELAY_MS = 10000;
 const MAX_RECONNECT_ATTEMPTS = 5;

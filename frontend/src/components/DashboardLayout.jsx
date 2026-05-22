@@ -536,7 +536,7 @@ const DashboardLayout = ({ children, sidebarActions = [], showBackButton = false
                                           <img
                                             src={result.profilePhoto.startsWith('http')
                                               ? result.profilePhoto
-                                              : `http://localhost:5001${result.profilePhoto.startsWith('/') ? '' : '/'}${result.profilePhoto}`}
+                                              : `${import.meta.env.VITE_API_URL?.replace('/api', '') || ''}${result.profilePhoto.startsWith('/') ? '' : '/'}${result.profilePhoto}`}
                                             alt={result.title}
                                             className="w-full h-full object-cover"
                                             onError={(e) => {
@@ -620,7 +620,7 @@ const DashboardLayout = ({ children, sidebarActions = [], showBackButton = false
                           <img
                             src={user.profilePhoto.startsWith('http')
                               ? user.profilePhoto
-                              : `http://localhost:5001${user.profilePhoto.startsWith('/') ? '' : '/'}${user.profilePhoto}`}
+                              : `${import.meta.env.VITE_API_URL?.replace('/api', '') || ''}${user.profilePhoto.startsWith('/') ? '' : '/'}${user.profilePhoto}`}
                             alt="Profile"
                             className="w-full h-full object-cover"
                             onError={(e) => {
@@ -740,7 +740,7 @@ const DashboardLayout = ({ children, sidebarActions = [], showBackButton = false
         <VoiceAgentModal
           isOpen={showVoiceModal}
           onClose={() => setShowVoiceModal(false)}
-          backendUrl="http://localhost:5002"
+          backendUrl={import.meta.env.VITE_BACKEND_URL || ""}
         />
       )}
     </div>

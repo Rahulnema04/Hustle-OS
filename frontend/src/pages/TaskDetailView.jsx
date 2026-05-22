@@ -151,7 +151,7 @@ const TaskDetailView = () => {
     
     // Handle files
     if (evidence.files && evidence.files.length > 0) {
-      const baseURL = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://193.203.160.42:9000';
+      const baseURL = import.meta.env.VITE_API_URL?.replace('/api', '') || '';
       evidence.files.forEach((file, index) => {
         evidenceItems.push({
           type: file.mimetype?.startsWith('image/') ? 'image' : 

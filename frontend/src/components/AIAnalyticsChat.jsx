@@ -6,7 +6,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useAuth } from '../context/AuthContext';
 
-const VITE_BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
+const VITE_BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
 
 const AIAnalyticsChat = ({ onClose }) => {
     const { token } = useAuth();

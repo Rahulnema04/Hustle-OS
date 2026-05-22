@@ -712,7 +712,7 @@ const QuickDetailsPanel = ({ item, onClose }) => {
                                                         <img
                                                             src={data.profilePhoto.startsWith('http')
                                                                 ? data.profilePhoto
-                                                                : `http://localhost:5001${data.profilePhoto.startsWith('/') ? '' : '/'}${data.profilePhoto}`}
+                                                                : `${import.meta.env.VITE_API_URL?.replace('/api', '') || ''}${data.profilePhoto.startsWith('/') ? '' : '/'}${data.profilePhoto}`}
                                                             alt={`${data.firstName} ${data.lastName}`}
                                                             className="w-full h-full object-cover"
                                                         />

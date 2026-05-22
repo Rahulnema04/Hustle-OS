@@ -7,7 +7,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 
 export const useVoiceStream = (options = {}) => {
     const {
-        url = 'http://localhost:5002',
+        url = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5002',
         onPartialTranscript = () => {},
         onFinalTranscript = () => {},
         onInstantResponse = () => {},

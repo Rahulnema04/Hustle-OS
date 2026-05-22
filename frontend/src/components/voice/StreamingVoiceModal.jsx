@@ -15,7 +15,7 @@ import { useVoiceStream } from '../../hooks/useVoiceStream';
 const StreamingVoiceModal = ({
     isOpen,
     onClose,
-    backendUrl = 'http://localhost:5002',
+    backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5002',
     category = null,
     onSessionEnd = null
 }) => {

@@ -1558,7 +1558,7 @@ const Profile = () => {
                   <img
                     src={profileData.profilePhoto.startsWith('http')
                       ? profileData.profilePhoto
-                      : `http://localhost:5001${profileData.profilePhoto.startsWith('/') ? '' : '/'}${profileData.profilePhoto}`}
+                      : `${import.meta.env.VITE_API_URL?.replace('/api', '') || ''}${profileData.profilePhoto.startsWith('/') ? '' : '/'}${profileData.profilePhoto}`}
                     alt="Profile"
                     className="w-full h-full object-cover"
                     onError={(e) => {

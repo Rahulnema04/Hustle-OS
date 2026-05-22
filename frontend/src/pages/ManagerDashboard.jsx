@@ -44,6 +44,8 @@ import { formatDate } from '../utils/helpers';
 import { showToast as toast } from '../utils/toast';
 import StatCard from '../components/StatCard';
 
+const analyticsApiUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+
 const ManagerDashboard = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -314,7 +316,7 @@ const ManagerDashboard = () => {
       setAiPreviewLoading(true);
 
       try {
-        const response = await fetch('http://localhost:8000/api/score-task', {
+        const response = await fetch(`${analyticsApiUrl}/api/score-task`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -366,7 +368,7 @@ const ManagerDashboard = () => {
     if (!title || !description || description.length < 10) return;
 
     try {
-      const response = await fetch('http://localhost:8000/api/predict-phase', {
+      const response = await fetch(`${analyticsApiUrl}/api/predict-phase`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title, description })
@@ -389,7 +391,7 @@ const ManagerDashboard = () => {
   // Feature 2: Fetch task breakdown suggestions
   const fetchTaskBreakdown = async (title, description, estimatedPoints, phase) => {
     try {
-      const response = await fetch('http://localhost:8000/api/suggest-breakdown', {
+      const response = await fetch(`${analyticsApiUrl}/api/suggest-breakdown`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1135,7 +1137,7 @@ const ManagerDashboard = () => {
                               <p className="text-xs font-medium text-gray-600 mb-1">Files ({task.evidence.files.length}):</p>
                               <div className="space-y-1">
                                 {task.evidence.files.map((file, idx) => (
-                                  <a key={idx} href={`http://localhost:5000/${file.path}`} target="_blank" rel="noopener noreferrer"
+                                  <a key={idx} href={`${import.meta.env.VITE_API_URL?.replace('/api', '') || ''}/${file.path}`} target="_blank" rel="noopener noreferrer"
                                     className="block text-xs text-blue-600 hover:underline bg-white px-2 py-1 rounded" >
                                     📎 {file.originalName || file.filename}
                                   </a >
