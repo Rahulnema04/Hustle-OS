@@ -1,10 +1,10 @@
 import axios from 'axios';
 
 // Get API URL from environment variables
-// Fallback: Use localhost in development, live server in production
+// Fallback: Use /api in production to hit the Vercel proxy, or localhost in development
 const API_URL = import.meta.env.VITE_API_URL || 
   (import.meta.env.MODE === 'production' 
-    ? 'http://193.203.160.42:9000/api' 
+    ? '/api' 
     : 'http://localhost:5005/api');
 
 // Debug: Log the API URL being used
