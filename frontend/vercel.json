@@ -1,0 +1,20 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/analytics/:match*",
+      "destination": "https://rahulnema04-hustle-os-analytics.hf.space/api/analytics/:match*"
+    },
+    {
+      "source": "/api/:match*",
+      "destination": "https://hustle-os.onrender.com/api/:match*"
+    },
+    {
+      "source": "/ws/voice",
+      "destination": "https://rahulnema04-hustle-os-analytics.hf.space/ws/voice"
+    },
+    {
+      "source": "/socket.io/:match*",
+      "destination": "https://rahulnema04-hustle-os-analytics.hf.space/socket.io/:match*"
+    }
+  ]
+}
