@@ -5,7 +5,7 @@ Intelligent retrieval of relevant context based on cofounder queries
 
 from typing import Dict, List, Any, Optional
 import re
-from rag.mongo_vector_store import MongoVectorStore  # Changed from VectorStore
+from rag.pinecone_vector_store import PineconeVectorStore
 from config import AnalyticsLLMConfig
 
 class Retriever:
@@ -13,7 +13,7 @@ class Retriever:
     
     def __init__(self):
         self.config = AnalyticsLLMConfig()
-        self.vector_store = MongoVectorStore()
+        self.vector_store = PineconeVectorStore()
         
     def identify_intent(self, query: str) -> List[str]:
         """

@@ -12,7 +12,11 @@ class AnalyticsLLMConfig:
     MAX_TOKENS = int(os.getenv("ANALYTICS_MAX_TOKENS", "300"))  # Reduced for fast voice responses
     
     # OpenRouter API endpoints
-    OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+    # Dynamic Base URL: If using Gemini, route to Google's OpenAI-compatible endpoint
+    if os.getenv("ANALYTICS_MODEL", "meta-llama/llama-4-maverick:free").startswith("gemini"):
+        OPENROUTER_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    else:
+        OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
     
     # MongoDB Atlas connection
     MONGODB_URI = os.getenv("MONGODB_URI", "")
@@ -26,12 +30,18 @@ class AnalyticsLLMConfig:
     CACHE_TTL = int(os.getenv("CACHE_TTL", "10"))  # 10 seconds for very fresh data in analytics
     
     # RAG Configuration
-    CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR", "./chroma_db")
+    CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR", "./chroma_db")  # Kept for legacy reference
     CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "500"))
     CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "50"))
     TOP_K_RESULTS = int(os.getenv("TOP_K_RESULTS", "2"))  # Reduced for faster retrieval
     RAG_TEMPERATURE = float(os.getenv("RAG_TEMPERATURE", "0.3"))
     SYNC_INTERVAL_HOURS = int(os.getenv("SYNC_INTERVAL_HOURS", "1"))
+
+    # Pinecone Vector Store Configuration
+    PINECONE_API_KEY = os.getenv("PINECONE_API_KEY", "")
+    PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "husl-os-rag")
+    # Dimension must match the embedding model output (all-mpnet-base-v2 → 768)
+    PINECONE_DIMENSION = int(os.getenv("PINECONE_DIMENSION", "768"))
     
     RAG_SYSTEM_PROMPT = """**CRITICAL GROUNDING RULES (MUST FOLLOW):**
 1. **ONLY use information from the CONTEXT provided below**

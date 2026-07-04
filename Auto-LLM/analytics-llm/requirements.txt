@@ -60,8 +60,9 @@ edge-tts>=6.1.9
 # -----------------------------------------------------------------------------
 # RAG (Retrieval Augmented Generation)
 # -----------------------------------------------------------------------------
-# Vector database for document retrieval
-chromadb==0.4.22
+# Pinecone managed vector database (replaces ChromaDB)
+pinecone>=3.0.0
+pinecone-text>=0.8.0          # Required for BM25 sparse vectors (Hybrid Search)
 
 # Embeddings
 sentence-transformers>=2.7.0

@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 import json
 from data_fetcher import DataFetcher
 from rag.document_processor import DocumentProcessor
-from rag.mongo_vector_store import MongoVectorStore  # Changed from ChromaDB
+from rag.pinecone_vector_store import PineconeVectorStore
 from config import AnalyticsLLMConfig
 
 class IngestionPipeline:
@@ -16,10 +16,44 @@ class IngestionPipeline:
     
     def __init__(self):
         self.config = AnalyticsLLMConfig()
-        self.vector_store = MongoVectorStore()
+        self.vector_store = PineconeVectorStore()
         self.document_processor = DocumentProcessor()
         self.data_fetcher = DataFetcher()
         self.last_sync = {}  # Track last sync time per collection
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _collect_chunks(
+        self,
+        raw_docs: list,
+        process_fn,
+    ) -> tuple:
+        """
+        Process a list of raw MongoDB dicts through process_fn, then chunk each
+        resulting document with chunk_document().  Returns three parallel lists
+        ready to pass straight into vector_store.add_documents().
+
+        Args:
+            raw_docs:   List of raw MongoDB dicts.
+            process_fn: A DocumentProcessor method (e.g. process_project).
+
+        Returns:
+            (documents, metadatas, ids) — all expanded by chunking.
+        """
+        documents: list = []
+        metadatas: list = []
+        ids: list = []
+
+        for raw in raw_docs:
+            processed = process_fn(raw)
+            for chunk in self.document_processor.chunk_document(processed):
+                documents.append(chunk["text"])
+                metadatas.append(chunk["metadata"])
+                ids.append(chunk["id"])
+
+        return documents, metadatas, ids
     
     def sync_all(self, category: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -130,45 +164,35 @@ class IngestionPipeline:
     def _sync_projects(self, category: Optional[str] = None) -> int:
         """Sync projects to vector database"""
         try:
-            # Fetch projects from MongoDB
             projects_data = self.data_fetcher.fetch_projects_data(
                 limit=1000,
                 category=category
             )
-            
+
             if not projects_data:
                 print("  No projects found")
                 return 0
-            
+
             print(f"  Fetched {len(projects_data)} projects from MongoDB")
-            
-            # Process projects into documents
-            documents = []
-            metadatas = []
-            ids = []
-            
-            for project in projects_data:
-                print(f"  DEBUG: Processing project {project.get('id')} - manager type: {type(project.get('manager'))}")
-                doc = self.document_processor.process_project(project)
-                documents.append(doc["text"])
-                metadatas.append(doc["metadata"])
-                ids.append(doc["id"])
-            
-            # Add to vector store
+
+            documents, metadatas, ids = self._collect_chunks(
+                projects_data, self.document_processor.process_project
+            )
+
             success = self.vector_store.add_documents(
                 collection_name="projects",
                 documents=documents,
                 metadatas=metadatas,
-                ids=ids
+                ids=ids,
             )
-            
+
             if success:
-                print(f"  ✓ Synced {len(documents)} projects to vector database")
-                return len(documents)
+                print(f"  ✓ Synced {len(projects_data)} projects → {len(documents)} chunks to Pinecone")
+                return len(projects_data)
             else:
                 print("  ❌ Failed to sync projects")
                 return 0
-                
+
         except Exception as e:
             print(f"  ❌ Error syncing projects: {e}")
             import traceback
@@ -178,89 +202,71 @@ class IngestionPipeline:
     def _sync_employees(self, category: Optional[str] = None) -> int:
         """Sync employees to vector database"""
         try:
-            # Fetch employees from MongoDB
             employees_data = self.data_fetcher.fetch_employee_reports(
-                days=90,  # Last 90 days of activity
+                days=90,
                 category=category
             )
-            
+
             if not employees_data:
                 print("  No employees found")
                 return 0
-            
+
             print(f"  Fetched {len(employees_data)} employees from MongoDB")
-            
-            # Process employees into documents
-            documents = []
-            metadatas = []
-            ids = []
-            
-            for employee in employees_data:
-                doc = self.document_processor.process_employee(employee)
-                documents.append(doc["text"])
-                metadatas.append(doc["metadata"])
-                ids.append(doc["id"])
-            
-            # Add to vector store
+
+            documents, metadatas, ids = self._collect_chunks(
+                employees_data, self.document_processor.process_employee
+            )
+
             success = self.vector_store.add_documents(
                 collection_name="employees",
                 documents=documents,
                 metadatas=metadatas,
-                ids=ids
+                ids=ids,
             )
-            
+
             if success:
-                print(f"  ✓ Synced {len(documents)} employees to vector database")
-                return len(documents)
+                print(f"  ✓ Synced {len(employees_data)} employees → {len(documents)} chunks to Pinecone")
+                return len(employees_data)
             else:
                 print("  ❌ Failed to sync employees")
                 return 0
-                
+
         except Exception as e:
             print(f"  ❌ Error syncing employees: {e}")
             return 0
-    
+
     def _sync_leaves(self, category: Optional[str] = None) -> int:
         """Sync leave requests to vector database"""
         try:
-            # Fetch leave requests from MongoDB
             leaves_data = self.data_fetcher.fetch_leave_requests(
                 category=category,
-                status_filter=None  # Get all statuses
+                status_filter=None
             )
-            
+
             if not leaves_data:
                 print("  No leave requests found")
                 return 0
-            
+
             print(f"  Fetched {len(leaves_data)} leave requests from MongoDB")
-            
-            # Process leaves into documents
-            documents = []
-            metadatas = []
-            ids = []
-            
-            for leave in leaves_data:
-                doc = self.document_processor.process_leave(leave)
-                documents.append(doc["text"])
-                metadatas.append(doc["metadata"])
-                ids.append(doc["id"])
-            
-            # Add to vector store
+
+            documents, metadatas, ids = self._collect_chunks(
+                leaves_data, self.document_processor.process_leave
+            )
+
             success = self.vector_store.add_documents(
                 collection_name="leaves",
                 documents=documents,
                 metadatas=metadatas,
-                ids=ids
+                ids=ids,
             )
-            
+
             if success:
-                print(f"  ✓ Synced {len(documents)} leave requests to vector database")
-                return len(documents)
+                print(f"  ✓ Synced {len(leaves_data)} leaves → {len(documents)} chunks to Pinecone")
+                return len(leaves_data)
             else:
                 print("  ❌ Failed to sync leave requests")
                 return 0
-                
+
         except Exception as e:
             print(f"  ❌ Error syncing leave requests: {e}")
             import traceback
@@ -314,24 +320,22 @@ class IngestionPipeline:
                 "inventory": "inventory_item"
             }
             doc_type = doc_type_map.get(collection_name, "general")
-            
-            for item in data:
-                doc = self.document_processor.process_generic_document(item, doc_type)
-                documents.append(doc["text"])
-                metadatas.append(doc["metadata"])
-                ids.append(doc["id"])
-            
-            # Add to vector store (collection name same as db collection name)
+
+            documents, metadatas, ids = self._collect_chunks(
+                data,
+                lambda item: self.document_processor.process_generic_document(item, doc_type)
+            )
+    
             success = self.vector_store.add_documents(
                 collection_name=collection_name,
                 documents=documents,
                 metadatas=metadatas,
-                ids=ids
+                ids=ids,
             )
-            
+    
             if success:
-                print(f"  ✓ Synced {len(documents)} {visual_name} to vector database")
-                return len(documents)
+                print(f"  ✓ Synced {len(data)} {visual_name} → {len(documents)} chunks to Pinecone")
+                return len(data)
             else:
                 print(f"  ❌ Failed to sync {visual_name}")
                 return 0

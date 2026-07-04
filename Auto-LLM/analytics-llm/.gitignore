@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Env
+.env
+*.env.local
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# ChromaDB (rebuilt at runtime from MongoDB)
+chroma_db/
+
+# Logs
+logs/
+*.log
+
+# Audio cache (rebuilt at runtime)
+voice/.tts_cache/
+
+# Whisper model cache (downloaded by HF at runtime)
+# NOTE: Do NOT ignore this if you want model to persist in Space
+# .cache/
+
+# Uploads
+uploads/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Cache files
+ffcache*

@@ -14,15 +14,25 @@ class EmbeddingsManager:
         self.cache: Dict[str, List[float]] = {}
         
         # Initialize sentence-transformers model
-        print("Initializing embeddings model...")
-        self.model = SentenceTransformer('all-MiniLM-L6-v2')
-        print("✓ Initialized embeddings: all-MiniLM-L6-v2")
+        print("Initializing embeddings model (all-mpnet-base-v2)...")
+        self.model = SentenceTransformer('all-mpnet-base-v2')
+        print("✓ Initialized embeddings: all-mpnet-base-v2")
+        
+        # Initialize BM25Encoder for sparse vectors (Hybrid Search)
+        print("Initializing BM25Encoder for Hybrid Search...")
+        try:
+            from pinecone_text.sparse import BM25Encoder
+            self.bm25 = BM25Encoder.default()
+            print("✓ Initialized BM25Encoder")
+        except ImportError:
+            print("⚠️ pinecone-text not installed. Hybrid search disabled.")
+            self.bm25 = None
     
     def _get_cache_key(self, text: str) -> str:
         """Generate cache key from text"""
         return hashlib.md5(text.encode()).hexdigest()
     
-    def embed_text(self, text: str) -> List[float]:
+    def embed_text(self, text: str) -> tuple[List[float], Dict[str, Any]]:
         """
         Embed a single text string
         
@@ -30,22 +40,19 @@ class EmbeddingsManager:
             text: Text to embed
             
         Returns:
-            List of embedding values (floats)
+            Tuple of (dense_embedding_list, sparse_embedding_dict)
         """
-        # Check cache
-        cache_key = self._get_cache_key(text)
-        if cache_key in self.cache:
-            return self.cache[cache_key]
+        # Generate dense embedding
+        dense = self.model.encode(text, convert_to_numpy=True).tolist()
         
-        # Generate embedding
-        embedding = self.model.encode(text, convert_to_numpy=True)
-        embedding_list = embedding.tolist()
-        
-        # Cache the result
-        self.cache[cache_key] = embedding_list
-        return embedding_list
+        # Generate sparse embedding (BM25)
+        sparse = None
+        if self.bm25:
+            sparse = self.bm25.encode_documents([text])[0]
+            
+        return dense, sparse
     
-    def embed_batch(self, texts: List[str], batch_size: int = 100) -> List[List[float]]:
+    def embed_batch(self, texts: List[str], batch_size: int = 100) -> tuple[List[List[float]], List[Dict[str, Any]]]:
         """
         Embed multiple texts efficiently in batches
         
@@ -54,20 +61,29 @@ class EmbeddingsManager:
             batch_size: Number of texts to process at once
             
         Returns:
-            List of embeddings (one per input text)
+            Tuple of (list_of_dense_embeddings, list_of_sparse_embeddings)
         """
-        embeddings = []
+        dense_embeddings = []
+        sparse_embeddings = []
         
         for i in range(0, len(texts), batch_size):
             batch = texts[i:i + batch_size]
             print(f"Embedding batch {i//batch_size + 1}/{(len(texts)-1)//batch_size + 1}")
             
-            batch_embeddings = [self.embed_text(text) for text in batch]
-            embeddings.extend(batch_embeddings)
+            # Dense
+            dense_batch = self.model.encode(batch, convert_to_numpy=True).tolist()
+            dense_embeddings.extend(dense_batch)
+            
+            # Sparse
+            if self.bm25:
+                sparse_batch = self.bm25.encode_documents(batch)
+                sparse_embeddings.extend(sparse_batch)
+            else:
+                sparse_embeddings.extend([None] * len(batch))
         
-        return embeddings
+        return dense_embeddings, sparse_embeddings
     
-    def embed_query(self, query: str) -> List[float]:
+    def embed_query(self, query: str) -> tuple[List[float], Dict[str, Any]]:
         """
         Embed a query for retrieval
         
@@ -75,15 +91,21 @@ class EmbeddingsManager:
             query: Search query text
             
         Returns:
-            Query embedding
+            Tuple of (dense_query_embedding, sparse_query_embedding)
         """
-        return self.embed_text(query)
+        dense = self.model.encode(query, convert_to_numpy=True).tolist()
+        
+        sparse = None
+        if self.bm25:
+            sparse = self.bm25.encode_queries(query)
+            
+        return dense, sparse
     
     def get_cache_stats(self) -> Dict[str, Any]:
         """Get cache statistics"""
         return {
             "cache_size": len(self.cache),
-            "model": "sentence-transformers/all-MiniLM-L6-v2"
+            "model": "sentence-transformers/all-mpnet-base-v2"
         }
     
     def clear_cache(self):

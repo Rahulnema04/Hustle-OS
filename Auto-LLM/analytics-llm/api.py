@@ -8,6 +8,7 @@ from flask_socketio import SocketIO, emit
 from flask_sock import Sock
 from datetime import datetime
 import json
+import os
 from data_fetcher import DataFetcher
 from config import AnalyticsLLMConfig
 
@@ -96,6 +97,24 @@ app = Flask(__name__)
 
 # Enable CORS globally for all domains to resolve preflight/access issues
 CORS(app, resources={r"/*": {"origins": "*"}})
+
+@app.route('/')
+def index():
+    """Root route — confirms the server is alive (shown on HF Spaces App tab)"""
+    return jsonify({
+        "service": "Hustle OS Analytics LLM",
+        "status": "running",
+        "version": "2.0",
+        "endpoints": {
+            "health":   "/api/analytics/health",
+            "projects": "/api/analytics/projects",
+            "employees":"/api/analytics/employees",
+            "summary":  "/api/analytics/summary",
+            "insights": "/api/analytics/insights",
+            "rag":      "/api/analytics/rag/query",
+            "voice_ws": "/ws/voice"
+        }
+    })
 
 # Configure Flask app for longer timeouts (voice processing can take 10-30s)
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -2104,46 +2123,13 @@ def voice_stream():
 
 
 if __name__ == '__main__':
+    SERVER_PORT = int(os.environ.get('PORT', 5002))
+
     print("=" * 60)
     print("Starting Analytics LLM API Server...")
-    print(f"Using Gemini Model: {config.MODEL_NAME}")
-    print(f"Database: {config.DB_NAME}")
-    print(f"MongoDB URI: {config.MONGODB_URI[:50]}...")
-    print(f"Server URL: http://0.0.0.0:5002")
-    print(f"Also accessible at: http://localhost:5002")
-    print("=" * 60)
-    
-    # Pre-load models for faster first response
-    print("\n🚀 Pre-loading models for faster responses...")
-    # try:
-    #     # Pre-load Whisper model (original OpenAI Whisper as fallback)
-    #     stt = get_stt_instance()
-    #     stt.preload_model()
-    #     print("✓ Whisper STT model pre-loaded")
-    # except Exception as e:
-    #     print(f"⚠️  Could not pre-load Whisper: {e}")
-    
-    # try:
-    #     # Pre-load Hugging Face models for streaming STT (low-latency)
-    #     print("\n🤖 Initializing Hugging Face models for streaming...")
-    #     hf_manager = get_hf_model_manager()
-    #     hf_pipeline = hf_manager.load_whisper()
-    #     if hf_pipeline:
-    #         hf_status = hf_manager.get_status()
-    #         print(f"✓ HF models ready: {hf_status}")
-    #     else:
-    #         print("⚠️  HF models could not be loaded, using fallback STT")
-    # except Exception as e:
-    #     print(f"⚠️  Could not initialize HF models: {e}")
-    
-    try:
-        # Pre-cache voice responses
-        print("\n🔊 Pre-caching voice responses...")
-        precache_voice_responses()
-    except Exception as e:
-        print(f"⚠️  Could not pre-cache voice responses: {e}")
-    
-    print("")
+    print(f"Model : {config.MODEL_NAME}")
+    print(f"DB    : {config.DB_NAME}")
+    print(f"Port  : {SERVER_PORT}")
     print("=" * 60)
     print("\nAvailable endpoints:")
     print("  GET  /api/analytics/health")
@@ -2152,42 +2138,54 @@ if __name__ == '__main__':
     print("  GET  /api/analytics/summary")
     print("  GET  /api/analytics/insights")
     print("  POST /api/analytics/refresh")
-    print("\n  🤖 RAG Endpoints (Direct MongoDB):")
-    print("  POST /api/analytics/rag/query       - Ask questions in natural language")
-    print("  GET  /api/analytics/rag/health      - Check RAG system status")
-    print("  GET  /api/analytics/rag/summary     - Get summary insights")
-    print("\n  🎤 Voice Agent Endpoints:")
-    print("  POST /api/analytics/rag/voice-query     - Voice query (audio in -> audio out)")
-    print("  POST /api/analytics/rag/speech-to-text  - Convert audio to text")
-    print("  POST /api/analytics/rag/text-to-speech  - Convert text to audio")
-    print("  GET  /api/analytics/rag/voice/health    - Check voice agent status")
-    print("  GET  /api/analytics/rag/voice/voices    - List available TTS voices")
-    print("\n  🔌 WebSocket Endpoints (Streaming):")
-    print("  WS   /ws/voice                          - Native WebSocket voice streaming")
-    print("  WS   /socket.io/                        - Socket.IO voice streaming (legacy)")
+    print("  POST /api/analytics/rag/query")
+    print("  WS   /ws/voice")
+    print("  WS   /socket.io/")
     print("=" * 60)
-    print("\n⚠️  Make sure to:")
-    print("  1. Keep this terminal window open")
-    print("  2. The server is running on http://localhost:5002")
-    print("  3. Your frontend can access this URL")
-    print("\n✓ Server is ready and waiting for requests...\n")
-    
-    # SocketIO event handlers registered at module level
-    
-    # Pre-load STT model to eliminate first-request latency (~5s savings)
-    print("\n🔧 Pre-loading STT model for faster first response...")
-    try:
-        from voice.speech_to_text import SpeechToText
-        stt_instance = SpeechToText()
-        stt_instance.preload_model()
-        print("✓ STT model pre-loaded successfully!")
-    except Exception as e:
-        print(f"⚠️ STT pre-load failed (will load on first request): {e}")
-    
-    # Start Flask-SocketIO server
-    print("\n🚀 SocketIO server starting on http://localhost:5002")
-    print("   Streaming STT events: start_streaming, audio_chunk, stop_streaming")
-    socketio.run(app, host='0.0.0.0', port=5002, debug=False, allow_unsafe_werkzeug=True)
+
+    # ── Background init (runs AFTER server is up) ──────────────────────────
+    # IMPORTANT: Do NOT block here. HF Spaces health-check hits /api/analytics/health
+    # within ~30s of container start. If the server hasn't started yet, the Space
+    # stays in "Starting..." forever.
+    def background_init():
+        """Heavy startup tasks — run in background so the server starts immediately."""
+        eventlet.sleep(8)  # Give the server 8s to fully bind and accept connections
+
+        # 1. Pre-load STT model (Whisper ~250MB download on first boot)
+        print("\n🔧 [BG] Pre-loading Whisper STT model...")
+        try:
+            from voice.speech_to_text import SpeechToText
+            global stt_instance
+            stt_instance = SpeechToText()
+            stt_instance.preload_model()
+            print("✅ [BG] Whisper STT model ready")
+        except Exception as e:
+            print(f"⚠️  [BG] STT pre-load skipped (loads on first request): {e}")
+
+        # 2. Pre-cache common TTS phrases
+        print("\n🔊 [BG] Pre-caching voice responses...")
+        try:
+            precache_voice_responses()
+            print("✅ [BG] Voice cache ready")
+        except Exception as e:
+            print(f"⚠️  [BG] Voice pre-cache skipped: {e}")
+
+        # 3. Start MongoDB Change Stream → Pinecone real-time sync
+        print("\n🔄 [BG] Starting real-time Pinecone sync (MongoDB Change Streams)...")
+        try:
+            from rag.change_stream_worker import get_change_stream_worker
+            worker = get_change_stream_worker()
+            worker.start()
+        except Exception as e:
+            print(f"⚠️  [BG] Change stream worker skipped: {e}")
+
+    eventlet.spawn(background_init)
+
+    # ── Start server immediately ────────────────────────────────────────────
+    print(f"\n🚀 Server starting on http://0.0.0.0:{SERVER_PORT}")
+    print("   (STT model + TTS cache loading in background...)\n")
+    socketio.run(app, host='0.0.0.0', port=SERVER_PORT, debug=False, allow_unsafe_werkzeug=True)
+
 
 
 

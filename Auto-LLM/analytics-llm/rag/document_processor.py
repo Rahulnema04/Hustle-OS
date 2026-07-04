@@ -7,6 +7,7 @@ from typing import Dict, List, Any
 from datetime import datetime
 from bson import ObjectId
 from config import AnalyticsLLMConfig
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 class DocumentProcessor:
     """Processes MongoDB data into rich text documents for RAG"""
@@ -497,28 +498,70 @@ class DocumentProcessor:
     
     def chunk_text(self, text: str) -> List[str]:
         """
-        Split long text into chunks for embedding
-        
+        Split long text into semantically coherent chunks using
+        RecursiveCharacterTextSplitter, which respects paragraph → line → word
+        boundaries instead of blindly slicing at a character offset.
+
+        all-MiniLM-L6-v2 has a 256-token context window (~1 000 chars).
+        Any text longer than that is silently truncated by the model, so
+        long documents MUST be split before embedding.
+
         Args:
-            text: Text to chunk
-            
+            text: Document text to split.
+
         Returns:
-            List of text chunks
+            List of text chunks (at least one element).
         """
-        chunk_size = self.config.CHUNK_SIZE
-        overlap = self.config.CHUNK_OVERLAP
-        
-        # Simple chunking by character count
-        chunks = []
-        start = 0
-        
-        while start < len(text):
-            end = start + chunk_size
-            chunk = text[start:end]
-            chunks.append(chunk)
-            start = end - overlap
-        
+        chunk_size = self.config.CHUNK_SIZE      # default 500 chars
+        overlap    = self.config.CHUNK_OVERLAP   # default 50 chars
+
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size,
+            chunk_overlap=overlap,
+            separators=["\n\n", "\n", " ", ""],  # paragraph → line → word → char
+        )
+
+        chunks = splitter.split_text(text)
         return chunks if chunks else [text]
+
+    def chunk_document(self, doc: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Chunk a processed document dict (as returned by process_* methods)
+        into multiple ready-to-upsert dicts, each with its own unique ID.
+
+        Short documents (≤ CHUNK_SIZE chars) are returned as-is (single item).
+        Long documents are split and each chunk gets a suffixed ID:
+            project_abc123       →  project_abc123_c0, project_abc123_c1, …
+
+        Each returned dict has keys: text, metadata, id.
+
+        Args:
+            doc: Output of any process_* method.
+
+        Returns:
+            List of chunk dicts ready for PineconeVectorStore.add_documents().
+        """
+        text     = doc["text"]
+        base_id  = doc["id"]
+        metadata = doc["metadata"]
+
+        chunks = self.chunk_text(text)
+
+        if len(chunks) == 1:
+            # Document fits in one chunk — return unchanged
+            return [doc]
+
+        result = []
+        for i, chunk in enumerate(chunks):
+            chunk_meta = dict(metadata)
+            chunk_meta["chunk_index"] = i
+            chunk_meta["chunk_total"] = len(chunks)
+            result.append({
+                "text":     chunk,
+                "metadata": chunk_meta,
+                "id":       f"{base_id}_c{i}",
+            })
+        return result
     
     def batch_process_projects(self, projects: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Process multiple projects"""
